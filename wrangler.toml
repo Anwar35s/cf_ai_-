@@ -15,7 +15,7 @@ class_name = "ResearchMemory"
 # Tell Cloudflare where the Durable Object class lives
 [[migrations]]
 tag = "v1"
-new_classes = ["ResearchMemory"]
+new_sqlite_classes = ["ResearchMemory"]
 
 # Workflow binding — wires the Workflow class to a name your Worker can call
 [[workflows]]
