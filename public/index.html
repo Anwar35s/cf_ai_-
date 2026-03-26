@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Research Agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f1117;
+      color: #e8e8e8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .subtitle { font-size: 0.875rem; color: #888; margin-bottom: 2rem; }
+
+    #app { width: 100%; max-width: 760px; }
+
+    .search-box {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #2a2a3a;
+      background: #1a1a2e;
+      color: #e8e8e8;
+      font-size: 1rem;
+    }
+
+    input[type="text"]:focus { outline: none; border-color: #6c6cff; }
+
+    button {
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      border: none;
+      background: #6c6cff;
+      color: white;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover { background: #5858e0; }
+    button:disabled { background: #3a3a5a; cursor: not-allowed; }
+
+    .status {
+      font-size: 0.85rem;
+      color: #888;
+      margin-bottom: 1rem;
+      min-height: 1.2em;
+    }
+
+    .steps {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+
+    .step {
+      padding: 0.3rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      background: #1a1a2e;
+      border: 1px solid #2a2a3a;
+      color: #666;
+      transition: all 0.3s;
+    }
+
+    .step.active { border-color: #6c6cff; color: #a0a0ff; }
+    .step.done { border-color: #2a6a3a; background: #0a2a1a; color: #5abf7a; }
+
+    .report {
+      background: #1a1a2e;
+      border: 1px solid #2a2a3a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      line-height: 1.7;
+      font-size: 0.95rem;
+      white-space: pre-wrap;
+    }
+
+    .report h1, .report h2, .report h3 {
+      color: #c0c0ff;
+      margin: 1rem 0 0.5rem;
+    }
+
+    .history { margin-top: 2rem; }
+    .history h2 { font-size: 1rem; color: #888; margin-bottom: 0.75rem; }
+
+    .history-item {
+      background: #1a1a2e;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.5rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: border-color 0.2s;
+    }
+
+    .history-item:hover { border-color: #6c6cff; }
+    .history-item .query { font-weight: 600; color: #c0c0ff; }
+    .history-item .date { font-size: 0.75rem; color: #555; margin-top: 0.2rem; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>AI Research Agent</h1>
+    <p class="subtitle">Powered by Llama 3.3 · Cloudflare Workflows</p>
+
+    <div class="search-box">
+      <input type="text" id="query" placeholder="What do you want to research?" />
+      <button id="btn" onclick="startResearch()">Research</button>
+    </div>
+
+    <div class="steps">
+      <span class="step" id="s1">1. Decompose</span>
+      <span class="step" id="s2">2. Search web</span>
+      <span class="step" id="s3">3. Summarize</span>
+      <span class="step" id="s4">4. Synthesize</span>
+    </div>
+
+    <div class="status" id="status"></div>
+    <div class="report" id="report" style="display:none"></div>
+
+    <div class="history" id="history-section" style="display:none">
+      <h2>Previous research</h2>
+      <div id="history-list"></div>
+    </div>
+  </div>
+
+  <script>
+    // Change this to your Worker URL after deploying
+    const API = "http://localhost:8787";
+
+    // Persistent session ID stored in localStorage — this is how
+    // the Durable Object knows which history to load
+    const sessionId = localStorage.getItem("sessionId") ?? crypto.randomUUID();
+    localStorage.setItem("sessionId", sessionId);
+
+    // Rough step timing — real status comes from polling
+    const STEP_DELAYS = [0, 3000, 8000, 14000];
+
+    async function startResearch() {
+      const query = document.getElementById("query").value.trim();
+      if (!query) return;
+
+      document.getElementById("btn").disabled = true;
+      document.getElementById("report").style.display = "none";
+      setStatus("Starting research...");
+      resetSteps();
+
+      const res = await fetch(`${API}/research`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, sessionId }),
+      });
+      const { workflowId } = await res.json();
+
+      // Animate steps with approximate timing while we poll
+      STEP_DELAYS.forEach((delay, i) => {
+        setTimeout(() => activateStep(i + 1), delay);
+      });
+
+      // Poll until done
+      poll(workflowId, query);
+    }
+
+    async function poll(workflowId, query) {
+      const res = await fetch(`${API}/research/${workflowId}?query=${encodeURIComponent(query)}`);
+      const data = await res.json();
+
+      if (data.status === "complete") {
+        completeSteps();
+        setStatus("");
+        showReport(data.report);
+        loadHistory();
+        document.getElementById("btn").disabled = false;
+      } else if (data.status === "errored") {
+        setStatus("Research failed. Please try again.");
+        document.getElementById("btn").disabled = false;
+      } else {
+        setStatus(`Running research... (${data.status})`);
+        setTimeout(() => poll(workflowId, query), 2000);
+      }
+    }
+
+    function showReport(markdown) {
+      // Very basic markdown → HTML (for a real app, use marked.js)
+      const html = markdown
+        .replace(/^### (.+)/gm, "<h3>$1</h3>")
+        .replace(/^## (.+)/gm, "<h2>$1</h2>")
+        .replace(/^# (.+)/gm, "<h1>$1</h1>")
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>");
+      const el = document.getElementById("report");
+      el.innerHTML = html;
+      el.style.display = "block";
+    }
+
+    async function loadHistory() {
+      const res = await fetch(`${API}/memory/${sessionId}`);
+      const { history } = await res.json();
+      if (!history?.length) return;
+      document.getElementById("history-section").style.display = "block";
+      document.getElementById("history-list").innerHTML = history
+        .slice().reverse()
+        .map(h => `
+          <div class="history-item" onclick="showReport(${JSON.stringify(h.report)})">
+            <div class="query">${h.query}</div>
+            <div class="date">${new Date(h.timestamp).toLocaleString()}</div>
+          </div>`)
+        .join("");
+    }
+
+    function setStatus(msg) { document.getElementById("status").textContent = msg; }
+    function resetSteps() { [1,2,3,4].forEach(i => { document.getElementById("s"+i).className = "step"; }); }
+    function activateStep(n) { document.getElementById("s"+n).className = "step active"; }
+    function completeSteps() { [1,2,3,4].forEach(i => { document.getElementById("s"+i).className = "step done"; }); }
+
+    // Load history on page load
+    loadHistory();
+  </script>
+</body>
+</html>

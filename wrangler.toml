@@ -1,0 +1,28 @@
+name = "research-agent"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Workers AI binding — gives you access to Llama 3.3 and other models
+[ai]
+binding = "AI"
+
+# Durable Object binding — this is your memory/state layer
+[[durable_objects.bindings]]
+name = "RESEARCH_MEMORY"
+class_name = "ResearchMemory"
+
+# Tell Cloudflare where the Durable Object class lives
+[[migrations]]
+tag = "v1"
+new_classes = ["ResearchMemory"]
+
+# Workflow binding — wires the Workflow class to a name your Worker can call
+[[workflows]]
+binding = "RESEARCH_WORKFLOW"
+name = "research-workflow"
+class_name = "ResearchWorkflow"
+
+# Environment variables (set secrets with: wrangler secret put BRAVE_API_KEY)
+[vars]
+ENVIRONMENT = "development"
